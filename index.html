@@ -434,6 +434,12 @@
             background: white;
         }
 
+        .otp-input.filled {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
         .travel-card {
             border: 2px solid #eee;
             border-radius: 20px;
@@ -884,6 +890,45 @@
             margin-bottom: 25px;
             line-height: 1.5;
         }
+
+        .loading-spinner {
+            display: none;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #4CAF50;
+            color: white;
+            padding: 16px 20px;
+            border-radius: 12px;
+            font-size: 0.9em;
+            transform: translateX(400px);
+            transition: transform 0.3s ease;
+            z-index: 1001;
+            max-width: 300px;
+        }
+
+        .toast.show {
+            transform: translateX(0);
+        }
+
+        .toast.error {
+            background: #f44336;
+        }
     </style>
 </head>
 <body>
@@ -1048,9 +1093,10 @@
                 <p style="text-align: center; margin-bottom: 30px; color: #666;">
                     Введите номер телефона для входа в систему
                 </p>
-                <input type="tel" class="phone-input" id="phoneInput" placeholder="+7 (777) 123-45-67" maxlength="12">
+                <input type="tel" class="phone-input" id="phoneInput" placeholder="+7 (777) 123-45-67" maxlength="18">
+                <div class="loading-spinner" id="phoneLoading"></div>
                 <div style="text-align: center; margin-top: 30px;">
-                    <button class="btn" id="phoneNextBtn" onclick="showScreen('otp')" disabled>Получить код</button>
+                    <button class="btn" id="phoneNextBtn" onclick="sendOTP()" disabled>Получить код</button>
                 </div>
                 <p style="text-align: center; margin-top: 20px; color: #666; font-size: 0.9em;">
                     Нажимая "Получить код", вы соглашаетесь с условиями использования и политикой конфиденциальности
@@ -1074,9 +1120,10 @@
                         <input type="text" class="otp-input" maxlength="1" data-index="2">
                         <input type="text" class="otp-input" maxlength="1" data-index="3">
                     </div>
-                    <button class="btn" id="otpNextBtn" onclick="showScreen('main')" disabled>Подтвердить</button>
+                    <div class="loading-spinner" id="otpLoading"></div>
+                    <button class="btn" id="otpNextBtn" onclick="verifyOTP()" disabled>Подтвердить</button>
                     <p style="margin-top: 20px; color: #666; font-size: 0.9em;">
-                        Код не пришел? <a href="#" style="color: #667eea; text-decoration: none;">Отправить повторно</a>
+                        Код не пришел? <a href="#" onclick="resendOTP(); return false;" style="color: #667eea; text-decoration: none;">Отправить повторно</a>
                     </p>
                 </div>
             </div>
@@ -1311,6 +1358,22 @@
                 </div>
             </div>
         </div>
+
+        <!-- Demo Modal -->
+        <div class="demo-modal" id="demoModal">
+            <div class="demo-modal-content">
+                <div class="demo-modal-icon">✈️</div>
+                <h3>Это демо-версия</h3>
+                <p>Для полного доступа ко всем функциям зарегистрируйтесь в приложении WanderGo</p>
+                <div class="demo-actions">
+                    <button class="btn demo-btn" onclick="showScreen('phone'); closeDemoModal();">Зарегистрироваться</button>
+                    <button class="btn-demo-secondary" onclick="closeDemoModal()">Закрыть</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast notification -->
+        <div class="toast" id="toast"></div>
     </div>
 
     <script>
@@ -1328,67 +1391,159 @@
             }
         }
 
-        // Phone input validation
-        document.getElementById('phoneInput').addEventListener('input', function(e) {
-            let value = e.target.value;
+        // Phone number formatting
+        const phoneInput = document.getElementById('phoneInput');
+        const phoneNextBtn = document.getElementById('phoneNextBtn');
+        
+        phoneInput?.addEventListener('input', function(e) {
+            let value = e.target.value.replace(/\D/g, '');
+            let formattedValue = '';
             
-            // Remove all non-digits
-            value = value.replace(/\D/g, '');
-            
-            // Add +7 prefix if not present
-            if (value.length > 0 && !value.startsWith('7')) {
-                value = '7' + value;
+            if (value.length > 0) {
+                formattedValue = '+7';
+                if (value.length > 1) {
+                    formattedValue += ' (' + value.substring(1, 4);
+                    if (value.length > 4) {
+                        formattedValue += ') ' + value.substring(4, 7);
+                        if (value.length > 7) {
+                            formattedValue += '-' + value.substring(7, 9);
+                            if (value.length > 9) {
+                                formattedValue += '-' + value.substring(9, 11);
+                            }
+                        }
+                    }
+                }
             }
             
-            // Format the number
-            if (value.length > 1) {
-                value = '+' + value.substring(0, 1) + value.substring(1);
-            }
-            
-            e.target.value = value;
-            
-            // Enable/disable next button
-            const nextBtn = document.getElementById('phoneNextBtn');
-            if (value.length === 12) {
-                nextBtn.disabled = false;
-                document.getElementById('phoneDisplay').textContent = value;
-            } else {
-                nextBtn.disabled = true;
-            }
+            e.target.value = formattedValue;
+            phoneNextBtn.disabled = value.length !== 11;
         });
 
+        // Send OTP
+        function sendOTP() {
+            const phone = phoneInput.value;
+            const loading = document.getElementById('phoneLoading');
+            loading.style.display = 'block';
+            
+            // Simulate API call
+            setTimeout(() => {
+                loading.style.display = 'none';
+                document.getElementById('phoneDisplay').textContent = phone;
+                showScreen('otp');
+                showToast('Код отправлен на ' + phone);
+                // Focus first OTP input
+                setTimeout(() => {
+                    document.querySelector('.otp-input[data-index="0"]')?.focus();
+                }, 100);
+            }, 1500);
+        }
+
         // OTP input handling
-        document.querySelectorAll('.otp-input').forEach((input, index) => {
+        const otpInputs = document.querySelectorAll('.otp-input');
+        const otpNextBtn = document.getElementById('otpNextBtn');
+        
+        otpInputs.forEach((input, index) => {
             input.addEventListener('input', function(e) {
                 if (e.target.value.length === 1) {
-                    if (index < 3) {
-                        document.querySelector(`[data-index="${index + 1}"]`).focus();
-                    }
-                }
-                
-                // Check if all inputs are filled
-                const allInputs = document.querySelectorAll('.otp-input');
-                const allFilled = Array.from(allInputs).every(input => input.value.length === 1);
-                
-                const otpNextBtn = document.getElementById('otpNextBtn');
-                if (allFilled) {
-                    const otp = Array.from(allInputs).map(input => input.value).join('');
-                    if (otp === '1234') {
-                        otpNextBtn.disabled = false;
-                    } else {
-                        otpNextBtn.disabled = true;
-                        // In real app, show error message
+                    e.target.classList.add('filled');
+                    if (index < otpInputs.length - 1) {
+                        otpInputs[index + 1].focus();
                     }
                 } else {
-                    otpNextBtn.disabled = true;
+                    e.target.classList.remove('filled');
                 }
+                
+                checkOTPComplete();
             });
             
             input.addEventListener('keydown', function(e) {
                 if (e.key === 'Backspace' && e.target.value === '' && index > 0) {
-                    document.querySelector(`[data-index="${index - 1}"]`).focus();
+                    otpInputs[index - 1].focus();
                 }
             });
+        });
+
+        function checkOTPComplete() {
+            const allFilled = Array.from(otpInputs).every(input => input.value.length === 1);
+            otpNextBtn.disabled = !allFilled;
+        }
+
+        // Verify OTP
+        function verifyOTP() {
+            const loading = document.getElementById('otpLoading');
+            loading.style.display = 'block';
+            
+            // Get OTP value
+            const otp = Array.from(otpInputs).map(input => input.value).join('');
+            
+            setTimeout(() => {
+                loading.style.display = 'none';
+                if (otp === '1234') {
+                    showScreen('main');
+                    showToast('Успешно авторизованы!', 'success');
+                } else {
+                    showToast('Неверный код. Попробуйте еще раз', 'error');
+                    // Clear inputs
+                    otpInputs.forEach(input => {
+                        input.value = '';
+                        input.classList.remove('filled');
+                    });
+                    otpInputs[0].focus();
+                }
+            }, 1500);
+        }
+
+        // Resend OTP
+        function resendOTP() {
+            showToast('Код отправлен повторно');
+        }
+
+        // Toast notifications
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast show';
+            if (type === 'error') toast.classList.add('error');
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Demo modal
+        function showDemoModal(action) {
+            const modal = document.getElementById('demoModal');
+            modal.classList.add('active');
+            
+            // Customize modal content based on action
+            const modalContent = modal.querySelector('.demo-modal-content');
+            const icon = modalContent.querySelector('.demo-modal-icon');
+            const title = modalContent.querySelector('h3');
+            const description = modalContent.querySelector('p');
+            
+            switch(action) {
+                case 'like':
+                    icon.textContent = '❤️';
+                    title.textContent = 'Избранное';
+                    description.textContent = 'Сохраняйте понравившиеся поездки в избранное в полной версии приложения';
+                    break;
+                default:
+                    icon.textContent = '💬';
+                    title.textContent = `Написать ${action}`;
+                    description.textContent = 'В полной версии вы сможете общаться с путешественниками и планировать поездки вместе';
+            }
+        }
+
+        function closeDemoModal() {
+            const modal = document.getElementById('demoModal');
+            modal.classList.remove('active');
+        }
+
+        // Close modal on backdrop click
+        document.getElementById('demoModal')?.addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeDemoModal();
+            }
         });
 
         // Create trip function
@@ -1414,8 +1569,8 @@
                                 }, 100);
                             } else if (screen.id === 'otp') {
                                 setTimeout(() => {
-                                    const otpInput = document.querySelector('.otp-input');
-                                    if (otpInput) otpInput.focus();
+                                    const firstOtpInput = document.querySelector('.otp-input[data-index="0"]');
+                                    if (firstOtpInput) firstOtpInput.focus();
                                 }, 100);
                             }
                         }
